@@ -1,0 +1,28 @@
+# Deployment checklist
+
+- [ ] `.env.local` exists locally and is ignored by Git
+- [ ] No Supabase secret/service-role key appears in source, client bundles, or Git history
+- [ ] Supabase migrations remain unapplied in production until staging validation is complete
+- [ ] Staging migrations were reviewed and applied incrementally only after a staging backup
+- [ ] `0002_auth_and_media_foundation.sql` was applied in staging only after a database backup
+- [ ] `0003_guest_auth_support.sql` was applied in staging only after 0002 verification
+- [ ] Existing `events` and `photos` row counts were verified after migration
+- [ ] Existing `event-photos` Storage bucket and objects were verified unchanged
+- [ ] `events`, `photos`, `admin_roles`, `guests`, `guest_sessions`, and `media` have RLS enabled
+- [ ] `event-photos` Storage bucket remains private
+- [ ] `ADMIN_SETUP_SECRET` is unique and strong during the controlled transition
+- [ ] Supabase Auth administrator has been provisioned through the controlled Dashboard/SQL procedure
+- [ ] Admin login, admin role verification, event creation, and logout have been tested
+- [ ] Browser admin dashboard does not send `ADMIN_SETUP_SECRET`
+- [ ] `ADMIN_SETUP_SECRET` fallback has been removed from the server and production configuration after Auth verification
+- [ ] Local event creation works
+- [ ] QR code opens the correct private guest URL
+- [ ] Upload valid JPEG/PNG/WebP succeeds
+- [ ] Oversized and invalid file types are rejected
+- [ ] Two browser sessions see new photos without manual refresh
+- [ ] Private signed URL expires and is regenerated on reload
+- [ ] GitHub repository is private until you're comfortable publishing the code
+- [ ] Vercel environment variables are configured for Production and Preview as needed
+- [ ] `NEXT_PUBLIC_SITE_URL` points to the final deployed origin
+- [ ] Production upload, live update, and mobile layout tested
+- [ ] Photo backup/export plan is ready before the real event
