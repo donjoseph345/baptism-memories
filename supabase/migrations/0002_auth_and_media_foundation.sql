@@ -13,6 +13,10 @@ alter table public.events
   add column if not exists closed_at timestamptz,
   add column if not exists updated_at timestamptz not null default now();
 
+-- Event-code-only events do not require a legacy bearer token.
+alter table public.events
+  alter column guest_token_hash drop not null;
+
 alter table public.events drop constraint if exists events_access_mode_check;
 alter table public.events
   add constraint events_access_mode_check
@@ -23,10 +27,23 @@ alter table public.events
   add constraint events_event_status_check
   check (event_status in ('open', 'closed'));
 
+do $$
+begin
+  if exists (
+    select 1
+    from public.events
+    where (access_mode is null and event_status is not null)
+       or (access_mode is not null and event_status is null)
+  ) then
+    raise exception 'events contain partially initialized access state';
+  end if;
+end $$;
+
 update public.events
 set
   access_mode = 'legacy_token',
-  event_status = case when is_active then 'open' else 'closed' end;
+  event_status = case when is_active then 'open' else 'closed' end
+where access_mode is null and event_status is null;
 
 -- Existing 0001 rows are mapped deterministically: is_active=true -> open,
 -- is_active=false -> closed. Abort if the backfill did not produce a consistent state.
@@ -41,9 +58,18 @@ begin
   end if;
 end $$;
 
+do $$
+begin
+  if exists (select 1 from public.events where access_mode is null or event_status is null) then
+    raise exception 'events backfill left null access state';
+  end if;
+end $$;
+
 alter table public.events
   alter column access_mode set default 'legacy_token',
-  alter column event_status set default 'open';
+  alter column event_status set default 'open',
+  alter column access_mode set not null,
+  alter column event_status set not null;
 
 alter table public.events drop constraint if exists events_access_credentials_check;
 alter table public.events
@@ -240,12 +266,13 @@ create policy media_admin_insert on public.media
 create policy media_admin_update on public.media
   for update to authenticated using (public.is_admin()) with check (public.is_admin());
 
+revoke all on public.admin_roles from public, anon, authenticated;
 grant select on public.admin_roles to authenticated;
-grant select, insert, update on public.events to authenticated;
-grant select on public.guests to authenticated;
-grant select on public.guest_sessions to authenticated;
-grant select, insert, update on public.media to authenticated;
-
+-- Authenticated users need only role self-select. Application data is server-mediated.
+revoke all on public.events from public, authenticated;
+revoke all on public.guests from public, authenticated;
+revoke all on public.guest_sessions from public, authenticated;
+revoke all on public.media from public, authenticated;
 revoke all on public.events from anon;
 revoke all on public.guests from anon;
 revoke all on public.guest_sessions from anon;

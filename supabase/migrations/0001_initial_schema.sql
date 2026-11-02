@@ -31,12 +31,38 @@ create index if not exists photos_event_status_idx on public.photos(event_id, st
 -- No browser-facing table policies are granted. Do not expose the service key to clients.
 alter table public.events enable row level security;
 alter table public.photos enable row level security;
+revoke all on public.events from public;
+revoke all on public.photos from public;
 revoke all on public.events from anon, authenticated;
 revoke all on public.photos from anon, authenticated;
 
 -- Private image bucket. Server API uses the service-role key after validating the guest token.
-insert into storage.buckets (id, name, public, file_size_limit, allowed_mime_types)
-values ('event-photos', 'event-photos', false, 8388608, array['image/jpeg','image/png','image/webp'])
-on conflict (id) do update set public=false, file_size_limit=8388608, allowed_mime_types=array['image/jpeg','image/png','image/webp'];
+do $$
+declare
+  existing_public boolean;
+  existing_file_size_limit bigint;
+  existing_mime_types text[];
+  expected_mime_types text[] := array['image/jpeg','image/png','image/webp'];
+  normalized_existing text[];
+  normalized_expected text[];
+begin
+  normalized_expected := array(select unnest(expected_mime_types) order by 1);
+
+  select public, file_size_limit, allowed_mime_types
+  into existing_public, existing_file_size_limit, existing_mime_types
+  from storage.buckets where id = 'event-photos';
+
+  if not found then
+    insert into storage.buckets (id, name, public, file_size_limit, allowed_mime_types)
+    values ('event-photos', 'event-photos', false, 8388608, expected_mime_types);
+  else
+    normalized_existing := array(select unnest(coalesce(existing_mime_types, array[]::text[])) order by 1);
+    if existing_public is distinct from false
+       or existing_file_size_limit is distinct from 8388608
+       or normalized_existing is distinct from normalized_expected then
+      raise exception 'event-photos bucket exists with unexpected configuration; no changes were made';
+    end if;
+  end if;
+end $$;
 
 -- Intentionally no public Storage policies. API routes create signed URLs and validate every guest request.

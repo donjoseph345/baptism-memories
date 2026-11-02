@@ -99,14 +99,40 @@ describe('late verification and route/migration security contracts', () => {
     expect(functions.map((m) => m[1])).toEqual([
       'consume_general_join_limits', 'reserve_failed_join_attempt', 'finalize_failed_join_attempt',
       'create_guest_session_for_event', 'revoke_guest_session', 'renew_failed_join_attempt',
+      'cleanup_guest_join_rate_limits',
     ]);
-    expect((migration3.match(/security definer/g) || []).length).toBe(6);
-    expect((migration3.match(/set search_path = pg_catalog, public/g) || []).length).toBe(6);
-    expect((migration3.match(/grant execute on function/g) || []).length).toBe(6);
-    expect((migration3.match(/revoke all on function/g) || []).length).toBe(6);
+    expect((migration3.match(/security definer/g) || []).length).toBe(7);
+    expect((migration3.match(/set search_path = pg_catalog, public/g) || []).length).toBe(7);
+    expect((migration3.match(/grant execute on function/g) || []).length).toBe(7);
+    expect((migration3.match(/revoke all on function/g) || []).length).toBe(7);
     expect(migration3).toContain('alter function public.create_guest_session_for_event');
     expect(migration3).toContain('revoke all on public.guest_join_rate_limits from public, anon, authenticated');
   });
+
+  it('covers migration rerun safety, nullability, grants, and reservation accounting contracts', async () => {
+    const migration1 = await read('supabase/migrations/0001_initial_schema.sql');
+    const migration2 = await read('supabase/migrations/0002_auth_and_media_foundation.sql');
+    const migration3 = await read('supabase/migrations/0003_guest_auth_support.sql');
+    expect(migration1).toContain('revoke all on public.events from public');
+    expect(migration1).toContain('revoke all on public.photos from public');
+    expect(migration1).toContain("file_size_limit, allowed_mime_types");
+    expect(migration2).toContain('alter column guest_token_hash drop not null');
+    expect(migration2).toContain('where access_mode is null and event_status is null');
+    expect(migration2).toContain('events contain partially initialized access state');
+    expect(migration2).toContain('alter column access_mode set not null');
+    expect(migration2).toContain('alter column event_status set not null');
+    expect(migration2).toContain('revoke all on public.admin_roles from public, anon, authenticated');
+    expect(migration2).toContain('grant select on public.admin_roles to authenticated');
+    expect(migration3).toContain('expired_counts');
+    expect(migration3).toContain('count(*)::integer as expired_count');
+    expect(migration3).toContain('lease_expires_at > p_now');
+    expect(migration3).toContain('r.window_started_at=l.window_started_at');
+    expect(migration3).toContain("if changed <> 2 then raise exception 'reservation scope accounting is inconsistent'");
+    expect(migration3).toContain("if counter_rows <> 2 then raise exception 'rate-limit counter accounting is inconsistent'");
+    expect(migration3).toContain('cleanup_guest_join_rate_limits');
+    expect(migration3).toContain('p_batch_size not between 1 and 10000');
+  });
+
 });
 
 afterEach(() => vi.restoreAllMocks());
